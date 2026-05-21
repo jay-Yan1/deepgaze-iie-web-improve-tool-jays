@@ -34,7 +34,9 @@ def _bytes_from_image(img: Image.Image, fmt: str = "PNG") -> bytes:
 
 def load_input_image() -> Optional[Image.Image]:
     """Render the input selector and return the chosen image."""
-    tab_upload, tab_url = st.tabs(["📤 上傳截圖", "🌐 輸入網址"])
+    tab_upload, tab_url = st.tabs(
+        ["Step 1 · 📤 上傳截圖", "Step 1 · 🌐 輸入網址"]
+    )
 
     image: Optional[Image.Image] = None
 
@@ -258,21 +260,39 @@ def render_aoi_table(results) -> None:
 
 
 def main() -> None:
-    st.title("👁️ DeepGaze IIE 網站視覺分析工具")
-    st.caption(
-        "上傳網站截圖或輸入網址，使用 DeepGaze IIE 預測使用者第一眼注意力分布，"
-        "再用 Claude 產生改版建議。"
+    st.markdown(
+        """
+        <div style="margin-bottom:0.6rem;">
+          <h2 style="margin:0;font-size:1.55rem;line-height:1.3;">
+            👁️ DeepGaze IIE 網站視覺分析
+          </h2>
+          <p style="margin:0.1rem 0 0;color:#777;font-size:0.88rem;">
+            預測使用者第一眼注意力分布 → Claude 給改版建議
+          </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.info(
+        "⬇️ **Step 1：在下方上傳截圖或貼上網址 → 按「🚀 開始分析」即可**",
+        icon="👇",
     )
 
     with st.sidebar:
-        st.header("⚙️ 設定")
+        st.markdown(
+            "<p style='font-size:0.78rem;color:#888;margin:0;'>🔑 API 設定</p>",
+            unsafe_allow_html=True,
+        )
         api_key = st.text_input(
             "Anthropic API Key",
             value=os.environ.get("ANTHROPIC_API_KEY", ""),
             type="password",
             help="僅在本機 session 使用，不會被儲存。",
+            label_visibility="collapsed",
+            placeholder="sk-ant-... (沒有 key 就跳過，只看熱力圖)",
         )
         st.divider()
+        st.header("Step 2 · ⚙️ 分析參數")
         top_k = st.slider(
             "Top-K 熱點數量",
             1,
@@ -333,7 +353,7 @@ def main() -> None:
     st.subheader("原始截圖")
     st.image(image, use_container_width=True)
 
-    if st.button("🚀 開始分析", type="primary", use_container_width=True):
+    if st.button("Step 3 · 🚀 開始分析", type="primary", use_container_width=True):
         predictor = get_predictor()
         t0 = time.time()
         with st.spinner("DeepGaze IIE 推論中…"):
