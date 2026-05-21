@@ -12,20 +12,41 @@ from PIL import Image
 from scipy.ndimage import zoom
 from scipy.special import logsumexp
 
-CENTERBIAS_URL = (
-    "https://github.com/matthias-k/DeepGaze/raw/main/centerbias_mit1003.npy"
+CENTERBIAS_URLS = (
+    "https://github.com/matthias-k/DeepGaze/raw/master/centerbias_mit1003.npy",
+    "https://github.com/matthias-k/DeepGaze/raw/main/centerbias_mit1003.npy",
 )
 CENTERBIAS_PATH = Path(__file__).resolve().parent.parent / "assets" / "centerbias_mit1003.npy"
 
 
 def _ensure_centerbias() -> np.ndarray:
-    """Download MIT1003 centerbias if not already cached, then load it."""
-    if not CENTERBIAS_PATH.exists():
-        CENTERBIAS_PATH.parent.mkdir(parents=True, exist_ok=True)
-        resp = requests.get(CENTERBIAS_URL, timeout=60)
-        resp.raise_for_status()
-        CENTERBIAS_PATH.write_bytes(resp.content)
-    return np.load(CENTERBIAS_PATH)
+    """Return the MIT1003 centerbias, downloading on first use.
+
+    Falls back to a uniform centerbias (officially supported by DeepGaze) if the
+    download fails, so the app still works offline / when upstream moves the file.
+    """
+    if CENTERBIAS_PATH.exists():
+        try:
+            return np.load(CENTERBIAS_PATH)
+        except Exception:
+            CENTERBIAS_PATH.unlink(missing_ok=True)
+
+    CENTERBIAS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    last_error: Optional[Exception] = None
+    for url in CENTERBIAS_URLS:
+        try:
+            resp = requests.get(url, timeout=60)
+            resp.raise_for_status()
+            CENTERBIAS_PATH.write_bytes(resp.content)
+            return np.load(CENTERBIAS_PATH)
+        except Exception as exc:
+            last_error = exc
+
+    print(
+        f"[saliency] centerbias download failed ({last_error!r}); "
+        "using uniform centerbias as fallback."
+    )
+    return np.zeros((1024, 1024), dtype=np.float32)
 
 
 class DeepGazePredictor:
