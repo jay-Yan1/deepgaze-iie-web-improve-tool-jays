@@ -52,8 +52,8 @@ section[data-testid="stFileUploaderDropzone"],
     background: #eff6ff !important;
     border: 2px dashed #4c9aff !important;
     border-radius: 12px !important;
-    padding: 1.5rem 1.25rem !important;
-    min-height: 130px !important;
+    padding: 1.8rem 1.25rem !important;
+    min-height: 180px !important;
     transition: background 0.2s ease, border-color 0.2s ease;
 }
 section[data-testid="stFileUploaderDropzone"]:hover,
@@ -65,12 +65,20 @@ section[data-testid="stFileUploaderDropzone"]:hover,
     background: #2680eb !important;
     color: #fff !important;
     border: 0 !important;
-    font-weight: 600 !important;
-    padding: 0.5rem 1.1rem !important;
-    border-radius: 6px !important;
+    font-weight: 700 !important;
+    padding: 0.85rem 2.2rem !important;
+    font-size: 1.05rem !important;
+    border-radius: 10px !important;
+    min-width: 200px !important;
+    box-shadow: 0 3px 12px rgba(38, 128, 235, 0.32) !important;
+    transition: background 0.15s ease, transform 0.05s ease;
 }
 [data-testid="stFileUploaderDropzone"] button:hover {
     background: #1c6ed0 !important;
+    box-shadow: 0 5px 16px rgba(38, 128, 235, 0.42) !important;
+}
+[data-testid="stFileUploaderDropzone"] button:active {
+    transform: translateY(1px);
 }
 
 /* === URL text input focus pop === */
@@ -433,39 +441,6 @@ def main() -> None:
         )
         st.divider()
         st.header("Step 2 · ⚙️ 分析參數")
-        top_k = st.slider(
-            "Top-K 熱點數量",
-            1,
-            10,
-            5,
-            help=(
-                "要在圖上框出幾個最吸睛的區域。數字越大會包含次要熱點，"
-                "通常 3–5 個最能聚焦核心問題。"
-            ),
-        )
-        threshold = st.slider(
-            "熱點門檻 (× max)",
-            0.3,
-            0.95,
-            0.6,
-            step=0.05,
-            help=(
-                "判定為熱點的最低顯著度，以圖中最高值的百分比為基準。"
-                "提高 → 只抓最強的小塊熱區；降低 → 連較弱的關注區域也會被框出。"
-            ),
-        )
-        alpha = st.slider(
-            "熱力圖透明度",
-            0.1,
-            0.9,
-            0.55,
-            step=0.05,
-            help=(
-                "熱力圖疊加在原圖上的不透明度。"
-                "調高熱力圖更明顯但會遮住原圖細節；調低能看清原始 UI 但熱區較淡。"
-            ),
-        )
-        st.divider()
         layout_mode = st.radio(
             "AOI 分區方式",
             ["垂直分區 (Header/Hero/Body/Footer)", "3×3 網格"],
@@ -478,12 +453,46 @@ def main() -> None:
         user_goal = st.text_area(
             "網站目標 / 場景描述 (給 LLM)",
             placeholder="例如：這是 SaaS 註冊頁，主要目標是讓訪客點擊『開始試用』按鈕。",
-            height=110,
+            height=100,
             help=(
                 "提供業務目標和情境給 Claude 參考。寫得越具體 (主要 CTA 是什麼、"
                 "目標受眾、想驗證的假設)，建議就越有針對性。"
             ),
         )
+
+        with st.expander("🔧 進階偵測參數", expanded=False):
+            top_k = st.slider(
+                "Top-K 熱點數量",
+                1,
+                10,
+                5,
+                help=(
+                    "要在圖上框出幾個最吸睛的區域。數字越大會包含次要熱點，"
+                    "通常 3–5 個最能聚焦核心問題。"
+                ),
+            )
+            threshold = st.slider(
+                "熱點門檻 (× max)",
+                0.3,
+                0.95,
+                0.6,
+                step=0.05,
+                help=(
+                    "判定為熱點的最低顯著度，以圖中最高值的百分比為基準。"
+                    "提高 → 只抓最強的小塊熱區；降低 → 連較弱的關注區域也會被框出。"
+                ),
+            )
+            alpha = st.slider(
+                "熱力圖透明度",
+                0.1,
+                0.9,
+                0.55,
+                step=0.05,
+                help=(
+                    "熱力圖疊加在原圖上的不透明度。"
+                    "調高熱力圖更明顯但會遮住原圖細節；調低能看清原始 UI 但熱區較淡。"
+                ),
+            )
 
     image = load_input_image()
     if image is None:
