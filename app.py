@@ -41,19 +41,51 @@ def load_input_image() -> Optional[Image.Image]:
             "選擇 PNG / JPG 截圖",
             type=["png", "jpg", "jpeg", "webp"],
             key="uploader",
+            help=(
+                "支援 PNG / JPG / JPEG / WEBP。建議使用 1024–2560 px 寬度的網頁截圖，"
+                "解析度太低會讓 DeepGaze 預測不準，太大會吃光記憶體。"
+            ),
         )
         if upload is not None:
             image = Image.open(upload).convert("RGB")
 
     with tab_url:
-        url = st.text_input("網址 (例如 https://example.com)", key="url")
+        url = st.text_input(
+            "網址 (例如 https://example.com)",
+            key="url",
+            help=(
+                "完整網址含 https://，工具會用 Playwright 開無頭 Chromium 載入頁面後截圖。"
+                "需要先執行 `python -m playwright install chromium` 安裝瀏覽器。"
+            ),
+        )
         col_a, col_b, col_c = st.columns(3)
         with col_a:
-            vp_w = st.number_input("Viewport 寬", 320, 2560, 1440, step=20)
+            vp_w = st.number_input(
+                "Viewport 寬",
+                320,
+                2560,
+                1440,
+                step=20,
+                help="模擬瀏覽器視窗寬度 (px)。1440 接近一般筆電解析度，375 模擬 iPhone。",
+            )
         with col_b:
-            vp_h = st.number_input("Viewport 高", 320, 2560, 900, step=20)
+            vp_h = st.number_input(
+                "Viewport 高",
+                320,
+                2560,
+                900,
+                step=20,
+                help="模擬瀏覽器視窗高度 (px)。如果啟用『整頁截圖』，這只影響首屏判定。",
+            )
         with col_c:
-            full_page = st.checkbox("整頁截圖", value=True)
+            full_page = st.checkbox(
+                "整頁截圖",
+                value=True,
+                help=(
+                    "勾選：截整個網頁 (含需要捲動的部分)，適合分析整體配置。\n"
+                    "不勾：只截 viewport 範圍內的首屏，更接近使用者第一眼看到的畫面。"
+                ),
+            )
         if url and st.button("擷取網頁截圖", use_container_width=True):
             with st.spinner("Playwright 開啟瀏覽器中…"):
                 try:
@@ -100,15 +132,56 @@ def main() -> None:
             help="僅在本機 session 使用，不會被儲存。",
         )
         st.divider()
-        top_k = st.slider("Top-K 熱點數量", 1, 10, 5)
-        threshold = st.slider("熱點門檻 (× max)", 0.3, 0.95, 0.6, step=0.05)
-        alpha = st.slider("熱力圖透明度", 0.1, 0.9, 0.55, step=0.05)
+        top_k = st.slider(
+            "Top-K 熱點數量",
+            1,
+            10,
+            5,
+            help=(
+                "要在圖上框出幾個最吸睛的區域。數字越大會包含次要熱點，"
+                "通常 3–5 個最能聚焦核心問題。"
+            ),
+        )
+        threshold = st.slider(
+            "熱點門檻 (× max)",
+            0.3,
+            0.95,
+            0.6,
+            step=0.05,
+            help=(
+                "判定為熱點的最低顯著度，以圖中最高值的百分比為基準。"
+                "提高 → 只抓最強的小塊熱區；降低 → 連較弱的關注區域也會被框出。"
+            ),
+        )
+        alpha = st.slider(
+            "熱力圖透明度",
+            0.1,
+            0.9,
+            0.55,
+            step=0.05,
+            help=(
+                "熱力圖疊加在原圖上的不透明度。"
+                "調高熱力圖更明顯但會遮住原圖細節；調低能看清原始 UI 但熱區較淡。"
+            ),
+        )
         st.divider()
-        layout_mode = st.radio("AOI 分區方式", ["垂直分區 (Header/Hero/Body/Footer)", "3×3 網格"])
+        layout_mode = st.radio(
+            "AOI 分區方式",
+            ["垂直分區 (Header/Hero/Body/Footer)", "3×3 網格"],
+            help=(
+                "如何把畫面切成多個分析區域 (Area of Interest)。\n"
+                "垂直分區：依網頁結構切 Header / Hero / Body / Footer，適合典型 landing page。\n"
+                "3×3 網格：均分成九宮格，適合非標準版面或想看左右/上下分布。"
+            ),
+        )
         user_goal = st.text_area(
             "網站目標 / 場景描述 (給 LLM)",
             placeholder="例如：這是 SaaS 註冊頁，主要目標是讓訪客點擊『開始試用』按鈕。",
             height=110,
+            help=(
+                "提供業務目標和情境給 Claude 參考。寫得越具體 (主要 CTA 是什麼、"
+                "目標受眾、想驗證的假設)，建議就越有針對性。"
+            ),
         )
 
     image = load_input_image()
