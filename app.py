@@ -444,6 +444,38 @@ def render_export_controls(report_md: str, advice: Optional[str]) -> None:
             st.code(advice, language="markdown")
 
 
+def _canvas_background_as_initial_drawing(image: Image.Image, width: int, height: int) -> dict:
+    """Embed ``image`` as a non-selectable fabric.js object so it acts as a
+    background, bypassing st_canvas's broken ``background_image`` path."""
+    buf = io.BytesIO()
+    if image.mode != "RGB":
+        image = image.convert("RGB")
+    image.save(buf, format="PNG")
+    src = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+    return {
+        "version": "4.4.0",
+        "objects": [
+            {
+                "type": "image",
+                "originX": "left",
+                "originY": "top",
+                "left": 0,
+                "top": 0,
+                "width": width,
+                "height": height,
+                "scaleX": 1,
+                "scaleY": 1,
+                "src": src,
+                "selectable": False,
+                "evented": False,
+                "hoverCursor": "default",
+                "crossOrigin": None,
+                "_aoi_bg": True,
+            }
+        ],
+    }
+
+
 def render_custom_aoi_editor(image: Image.Image) -> List[tuple]:
     """Drawable canvas for user-defined AOI rectangles.
 
@@ -511,18 +543,21 @@ def render_custom_aoi_editor(image: Image.Image) -> List[tuple]:
         fill_color="rgba(255, 165, 0, 0.20)",
         stroke_width=2,
         stroke_color="#ff6b3d",
-        background_color="#ffffff",
-        background_image=canvas_bg,
+        background_color="rgba(0, 0, 0, 0)",
         drawing_mode=drawing_mode,
         height=display_h,
         width=display_w,
         update_streamlit=True,
+        initial_drawing=_canvas_background_as_initial_drawing(canvas_bg, display_w, display_h),
         key="aoi_canvas",
     )
 
     objects = []
     if canvas_result.json_data:
-        objects = [o for o in canvas_result.json_data.get("objects", []) if o.get("type") == "rect"]
+        objects = [
+            o for o in canvas_result.json_data.get("objects", [])
+            if o.get("type") == "rect" and not o.get("_aoi_bg")
+        ]
 
     if not objects:
         st.info("📌 還沒畫任何 AOI。在上方圖片上按住滑鼠拖曳建立第一個框。")
