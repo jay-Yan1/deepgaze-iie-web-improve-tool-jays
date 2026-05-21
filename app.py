@@ -58,7 +58,7 @@ def load_input_image() -> Optional[Image.Image]:
                 "需要先執行 `python -m playwright install chromium` 安裝瀏覽器。"
             ),
         )
-        col_a, col_b, col_c = st.columns(3)
+        col_a, col_b = st.columns(2)
         with col_a:
             vp_w = st.number_input(
                 "Viewport 寬",
@@ -75,22 +75,42 @@ def load_input_image() -> Optional[Image.Image]:
                 2560,
                 900,
                 step=20,
-                help="模擬瀏覽器視窗高度 (px)。如果啟用『整頁截圖』，這只影響首屏判定。",
+                help="模擬瀏覽器視窗高度 (px)。整頁截圖時這只影響首屏載入；視窗截圖時就是最終圖片高度。",
             )
-        with col_c:
-            full_page = st.checkbox(
-                "整頁截圖",
-                value=True,
-                help=(
-                    "勾選：截整個網頁 (含需要捲動的部分)，適合分析整體配置。\n"
-                    "不勾：只截 viewport 範圍內的首屏，更接近使用者第一眼看到的畫面。"
-                ),
-            )
+
+        capture_mode = st.radio(
+            "截圖範圍",
+            ["🌐 整個網頁 (含需捲動的部分)", "🖥️ 只擷取視窗範圍 (首屏)"],
+            index=0,
+            help=(
+                "整個網頁：把整份 HTML 從頂到底拍下來，圖片可能很長，但能分析整體配置和下方內容。\n"
+                "視窗範圍：只截 viewport 大小的首屏，更貼近使用者打開網頁第一眼看到的畫面。"
+            ),
+        )
+        full_page = capture_mode.startswith("🌐")
+
+        auto_scroll = st.checkbox(
+            "整頁截圖前先自動捲動觸發 lazy-load",
+            value=True,
+            help=(
+                "勾選後會在截圖前慢慢捲到頁底再回頂，讓延遲載入的圖片/區塊都出現。"
+                "如果你發現截到的整頁有空白或圖片沒載入，就勾這個。只在『整個網頁』模式下生效。"
+            ),
+            disabled=not full_page,
+        )
+
         if url and st.button("擷取網頁截圖", use_container_width=True):
-            with st.spinner("Playwright 開啟瀏覽器中…"):
+            spinner_msg = "整頁截圖中（捲動載入 + 拍照可能要 10–30 秒）…" if full_page else "Playwright 截圖中…"
+            with st.spinner(spinner_msg):
                 try:
-                    captured = capture_url(url, viewport=(int(vp_w), int(vp_h)), full_page=full_page)
+                    captured = capture_url(
+                        url,
+                        viewport=(int(vp_w), int(vp_h)),
+                        full_page=full_page,
+                        auto_scroll=auto_scroll,
+                    )
                     st.session_state["captured_image"] = captured
+                    st.success(f"截圖完成：{captured.size[0]} × {captured.size[1]} px")
                 except Exception as exc:
                     st.error(f"截圖失敗：{exc}")
         if "captured_image" in st.session_state and not image:
