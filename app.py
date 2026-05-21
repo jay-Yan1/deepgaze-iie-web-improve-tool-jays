@@ -54,8 +54,8 @@ def load_input_image() -> Optional[Image.Image]:
             "網址 (例如 https://example.com)",
             key="url",
             help=(
-                "完整網址含 https://，工具會用 Playwright 開無頭 Chromium 載入頁面後截圖。"
-                "需要先執行 `python -m playwright install chromium` 安裝瀏覽器。"
+                "完整網址含 https://。截圖會在伺服器端用 Playwright 開無頭 Chromium 完成，"
+                "你只要貼網址、按下方按鈕即可，不需要在自己電腦安裝任何東西。"
             ),
         )
         col_a, col_b = st.columns(2)
