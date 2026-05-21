@@ -530,6 +530,11 @@ def render_custom_aoi_editor(image: Image.Image) -> List[tuple]:
     regions: List[tuple] = []
     preset_names = ["", "Logo", "Hero", "主 CTA", "次要 CTA", "Navigation", "Content", "Footer", "Form"]
 
+    def _apply_aoi_preset(idx: int) -> None:
+        preset_val = st.session_state.get(f"aoi_preset_{idx}", "")
+        if preset_val:
+            st.session_state[f"aoi_name_{idx}"] = preset_val
+
     for i, obj in enumerate(objects):
         scale_x = obj.get("scaleX", 1) or 1
         scale_y = obj.get("scaleY", 1) or 1
@@ -546,25 +551,27 @@ def render_custom_aoi_editor(image: Image.Image) -> List[tuple]:
         w = min(w, orig_w - x)
         h = min(h, orig_h - y)
 
+        name_key = f"aoi_name_{i}"
+        if name_key not in st.session_state:
+            st.session_state[name_key] = f"Region {i+1}"
+
         c1, c2, c3 = st.columns([3, 2, 4])
         with c1:
             name = st.text_input(
                 "名稱",
-                value=st.session_state.get(f"aoi_name_{i}", f"Region {i+1}"),
-                key=f"aoi_name_{i}",
+                key=name_key,
                 label_visibility="collapsed",
                 placeholder=f"框 #{i+1} 名稱",
             )
         with c2:
-            preset = st.selectbox(
+            st.selectbox(
                 "預設",
                 preset_names,
                 key=f"aoi_preset_{i}",
                 label_visibility="collapsed",
+                on_change=_apply_aoi_preset,
+                args=(i,),
             )
-            if preset and preset != st.session_state.get(f"aoi_name_{i}", ""):
-                st.session_state[f"aoi_name_{i}"] = preset
-                name = preset
         with c3:
             st.caption(f"位置 ({x},{y})  尺寸 {w}×{h} px")
 
