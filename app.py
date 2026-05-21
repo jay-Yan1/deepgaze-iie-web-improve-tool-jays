@@ -1,6 +1,7 @@
 """Streamlit entry point for the DeepGaze IIE website analyzer."""
 from __future__ import annotations
 
+import base64
 import hashlib
 import io
 import json
@@ -20,6 +21,43 @@ from src.llm_advisor import suggest_improvements
 from src.saliency import DeepGazePredictor
 from src.screenshot import capture_url
 from src.visualization import Hotspot, draw_hotspots, find_hotspots, overlay_heatmap
+
+
+def _patch_streamlit_image_to_url() -> None:
+    """Polyfill ``streamlit.elements.image.image_to_url`` removed in Streamlit ≥ 1.30.
+
+    streamlit-drawable-canvas still imports this private helper, which now
+    raises AttributeError. We restore it with a tiny base64 data-URL fallback
+    so the canvas component keeps working.
+    """
+    try:
+        import streamlit.elements.image as st_image  # type: ignore
+    except Exception:
+        return
+    if hasattr(st_image, "image_to_url"):
+        return
+
+    def image_to_url(image, width, clamp, channels, output_format, image_id):
+        pil_image = image
+        if isinstance(image, np.ndarray):
+            pil_image = Image.fromarray(image.astype("uint8"))
+        if not isinstance(pil_image, Image.Image):
+            return ""
+        fmt = "PNG"
+        if output_format and str(output_format).upper() in ("JPEG", "JPG"):
+            fmt = "JPEG"
+            if pil_image.mode != "RGB":
+                pil_image = pil_image.convert("RGB")
+        buf = io.BytesIO()
+        pil_image.save(buf, format=fmt)
+        b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+        mime = "image/png" if fmt == "PNG" else "image/jpeg"
+        return f"data:{mime};base64,{b64}"
+
+    st_image.image_to_url = image_to_url  # type: ignore[attr-defined]
+
+
+_patch_streamlit_image_to_url()
 
 st.set_page_config(page_title="DeepGaze IIE Website Analyzer", layout="wide")
 
