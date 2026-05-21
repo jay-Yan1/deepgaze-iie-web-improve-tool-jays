@@ -26,9 +26,9 @@ from src.visualization import Hotspot, draw_hotspots, find_hotspots, overlay_hea
 def _patch_streamlit_image_to_url() -> None:
     """Polyfill ``streamlit.elements.image.image_to_url`` removed in Streamlit ≥ 1.30.
 
-    streamlit-drawable-canvas still imports this private helper, which now
-    raises AttributeError. We restore it with a tiny base64 data-URL fallback
-    so the canvas component keeps working.
+    streamlit-drawable-canvas still imports this private helper. We restore it
+    using the modern Streamlit media file manager (proper /media/<hash>.png
+    URLs); we fall back to a base64 data URL if the runtime isn't available.
     """
     try:
         import streamlit.elements.image as st_image  # type: ignore
@@ -43,16 +43,45 @@ def _patch_streamlit_image_to_url() -> None:
             pil_image = Image.fromarray(image.astype("uint8"))
         if not isinstance(pil_image, Image.Image):
             return ""
+
+        if pil_image.mode not in ("RGB", "RGBA"):
+            pil_image = pil_image.convert("RGB")
+
         fmt = "PNG"
         if output_format and str(output_format).upper() in ("JPEG", "JPG"):
             fmt = "JPEG"
             if pil_image.mode != "RGB":
                 pil_image = pil_image.convert("RGB")
+
         buf = io.BytesIO()
         pil_image.save(buf, format=fmt)
-        b64 = base64.b64encode(buf.getvalue()).decode("ascii")
-        mime = "image/png" if fmt == "PNG" else "image/jpeg"
-        return f"data:{mime};base64,{b64}"
+        image_bytes = buf.getvalue()
+        mimetype = "image/png" if fmt == "PNG" else "image/jpeg"
+
+        # Preferred path: register with Streamlit's media file manager so the
+        # browser fetches via /media/<hash>.png instead of a huge data URL.
+        try:
+            from streamlit.runtime import Runtime  # type: ignore
+            from streamlit.runtime.scriptrunner import get_script_run_ctx  # type: ignore
+
+            runtime = Runtime.instance()
+            ctx = get_script_run_ctx()
+            session_id = ctx.session_id if ctx is not None else ""
+            mgr = runtime.media_file_mgr
+            try:
+                from streamlit.runtime.media_file_storage import MediaFileKind  # type: ignore
+                kind = MediaFileKind.MEDIA
+            except Exception:
+                kind = None
+            if kind is not None:
+                return mgr.add(image_bytes, mimetype, session_id, kind=kind)
+            return mgr.add(image_bytes, mimetype, session_id)
+        except Exception:
+            pass
+
+        # Fallback: base64 data URL (works for small images even without runtime)
+        b64 = base64.b64encode(image_bytes).decode("ascii")
+        return f"data:{mimetype};base64,{b64}"
 
     st_image.image_to_url = image_to_url  # type: ignore[attr-defined]
 
@@ -447,6 +476,15 @@ def render_custom_aoi_editor(image: Image.Image) -> List[tuple]:
     scale = display_w / orig_w
     display_h = int(orig_h * scale)
 
+    # Pre-resize the image to canvas dimensions: smaller payload + the
+    # frontend renders the bitmap 1:1 without browser-side scaling artefacts.
+    if (display_w, display_h) != (orig_w, orig_h):
+        canvas_bg = image.resize((display_w, display_h), Image.LANCZOS)
+    else:
+        canvas_bg = image
+    if canvas_bg.mode != "RGB":
+        canvas_bg = canvas_bg.convert("RGB")
+
     st.markdown("#### 🖍️ 自訂 AOI（在圖上拖曳畫框）")
     st.caption(
         f"原始尺寸 {orig_w}×{orig_h} px → 顯示縮放至 {display_w}×{display_h} px 方便操作。"
@@ -471,7 +509,8 @@ def render_custom_aoi_editor(image: Image.Image) -> List[tuple]:
         fill_color="rgba(255, 165, 0, 0.20)",
         stroke_width=2,
         stroke_color="#ff6b3d",
-        background_image=image,
+        background_color="#ffffff",
+        background_image=canvas_bg,
         drawing_mode=drawing_mode,
         height=display_h,
         width=display_w,
