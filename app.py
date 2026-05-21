@@ -26,9 +26,10 @@ from src.visualization import Hotspot, draw_hotspots, find_hotspots, overlay_hea
 def _patch_streamlit_image_to_url() -> None:
     """Polyfill ``streamlit.elements.image.image_to_url`` removed in Streamlit ≥ 1.30.
 
-    streamlit-drawable-canvas still imports this private helper. We restore it
-    using the modern Streamlit media file manager (proper /media/<hash>.png
-    URLs); we fall back to a base64 data URL if the runtime isn't available.
+    streamlit-drawable-canvas still imports this private helper. We return a
+    self-contained base64 data URL so the canvas iframe can render it
+    without depending on Streamlit's media file server (which sometimes
+    silently drops requests from inside the canvas iframe).
     """
     try:
         import streamlit.elements.image as st_image  # type: ignore
@@ -37,51 +38,38 @@ def _patch_streamlit_image_to_url() -> None:
     if hasattr(st_image, "image_to_url"):
         return
 
+    call_counter = {"n": 0}
+
     def image_to_url(image, width, clamp, channels, output_format, image_id):
+        call_counter["n"] += 1
         pil_image = image
         if isinstance(image, np.ndarray):
             pil_image = Image.fromarray(image.astype("uint8"))
         if not isinstance(pil_image, Image.Image):
+            print(
+                f"[image_to_url] called with unsupported type "
+                f"{type(image).__name__} for image_id={image_id!r}"
+            )
             return ""
 
-        if pil_image.mode not in ("RGB", "RGBA"):
+        if pil_image.mode != "RGB":
             pil_image = pil_image.convert("RGB")
 
         fmt = "PNG"
         if output_format and str(output_format).upper() in ("JPEG", "JPG"):
             fmt = "JPEG"
-            if pil_image.mode != "RGB":
-                pil_image = pil_image.convert("RGB")
 
         buf = io.BytesIO()
         pil_image.save(buf, format=fmt)
         image_bytes = buf.getvalue()
         mimetype = "image/png" if fmt == "PNG" else "image/jpeg"
-
-        # Preferred path: register with Streamlit's media file manager so the
-        # browser fetches via /media/<hash>.png instead of a huge data URL.
-        try:
-            from streamlit.runtime import Runtime  # type: ignore
-            from streamlit.runtime.scriptrunner import get_script_run_ctx  # type: ignore
-
-            runtime = Runtime.instance()
-            ctx = get_script_run_ctx()
-            session_id = ctx.session_id if ctx is not None else ""
-            mgr = runtime.media_file_mgr
-            try:
-                from streamlit.runtime.media_file_storage import MediaFileKind  # type: ignore
-                kind = MediaFileKind.MEDIA
-            except Exception:
-                kind = None
-            if kind is not None:
-                return mgr.add(image_bytes, mimetype, session_id, kind=kind)
-            return mgr.add(image_bytes, mimetype, session_id)
-        except Exception:
-            pass
-
-        # Fallback: base64 data URL (works for small images even without runtime)
         b64 = base64.b64encode(image_bytes).decode("ascii")
-        return f"data:{mimetype};base64,{b64}"
+        url = f"data:{mimetype};base64,{b64}"
+        print(
+            f"[image_to_url] #{call_counter['n']} {image_id!r} → "
+            f"{pil_image.size} {fmt} {len(image_bytes)} bytes (data URL len {len(url)})"
+        )
+        return url
 
     st_image.image_to_url = image_to_url  # type: ignore[attr-defined]
 
@@ -472,9 +460,15 @@ def render_custom_aoi_editor(image: Image.Image) -> List[tuple]:
         return []
 
     orig_w, orig_h = image.size
-    display_w = min(900, orig_w)
+    # Keep the canvas reasonably small — a giant data URL can fail to load
+    # in the canvas iframe. Long screenshots especially benefit from this.
+    display_w = min(800, orig_w)
     scale = display_w / orig_w
     display_h = int(orig_h * scale)
+    if display_h > 1400:
+        scale = 1400 / orig_h
+        display_h = 1400
+        display_w = int(orig_w * scale)
 
     # Pre-resize the image to canvas dimensions: smaller payload + the
     # frontend renders the bitmap 1:1 without browser-side scaling artefacts.
@@ -490,6 +484,14 @@ def render_custom_aoi_editor(image: Image.Image) -> List[tuple]:
         f"原始尺寸 {orig_w}×{orig_h} px → 顯示縮放至 {display_w}×{display_h} px 方便操作。"
         " 系統會自動換算回原始座標。"
     )
+
+    with st.expander("🐞 debug：背景圖確認", expanded=False):
+        st.write(
+            "型別:", type(canvas_bg).__name__,
+            "  size:", canvas_bg.size,
+            "  mode:", canvas_bg.mode,
+        )
+        st.image(canvas_bg, caption="這張就是即將餵給畫布的背景圖")
 
     col_ctrl1, col_ctrl2 = st.columns([3, 1])
     with col_ctrl1:
