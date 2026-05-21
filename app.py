@@ -1,7 +1,9 @@
 """Streamlit entry point for the DeepGaze IIE website analyzer."""
 from __future__ import annotations
 
+import hashlib
 import io
+import json
 import os
 import time
 from datetime import datetime
@@ -9,6 +11,7 @@ from typing import List, Optional
 
 import numpy as np
 import streamlit as st
+import streamlit.components.v1 as components
 from PIL import Image
 
 from src import aoi as aoi_mod
@@ -198,6 +201,61 @@ def build_report(
     return "\n".join(lines)
 
 
+def copy_to_clipboard_button(text: str, label: str = "📋 複製到剪貼簿") -> None:
+    """Render a JS-powered copy button that works in HTTP (LAN) too.
+
+    Streamlit's built-in `st.code()` copy uses `navigator.clipboard`, which
+    silently no-ops outside Secure Contexts (HTTPS / localhost). We fall back
+    to `document.execCommand('copy')` so LAN IP access still works.
+    """
+    payload = json.dumps(text)
+    button_id = "copy-btn-" + hashlib.md5(text.encode("utf-8")).hexdigest()[:10]
+    html = f"""
+    <div style="margin:0.25rem 0;">
+      <button id="{button_id}"
+              style="padding:0.45rem 1rem;border:1px solid #ccc;border-radius:6px;
+                     background:#f6f8fa;cursor:pointer;font-size:0.92rem;
+                     font-family:inherit;">
+        {label}
+      </button>
+      <span id="{button_id}-status"
+            style="margin-left:0.6rem;color:#0a7d2c;font-size:0.85rem;"></span>
+    </div>
+    <script>
+      (function() {{
+        const btn = document.getElementById("{button_id}");
+        const status = document.getElementById("{button_id}-status");
+        if (!btn) return;
+        btn.addEventListener("click", async () => {{
+          const text = {payload};
+          let ok = false;
+          if (navigator.clipboard && window.isSecureContext) {{
+            try {{
+              await navigator.clipboard.writeText(text);
+              ok = true;
+            }} catch (e) {{ ok = false; }}
+          }}
+          if (!ok) {{
+            const ta = document.createElement("textarea");
+            ta.value = text;
+            ta.style.position = "fixed";
+            ta.style.left = "-9999px";
+            ta.setAttribute("readonly", "");
+            document.body.appendChild(ta);
+            ta.select();
+            try {{ ok = document.execCommand("copy"); }} catch (e) {{ ok = false; }}
+            document.body.removeChild(ta);
+          }}
+          status.style.color = ok ? "#0a7d2c" : "#c92a2a";
+          status.textContent = ok ? "✓ 已複製" : "✗ 複製失敗 (請手動選取)";
+          setTimeout(() => {{ status.textContent = ""; }}, 2500);
+        }});
+      }})();
+    </script>
+    """
+    components.html(html, height=60)
+
+
 def render_export_controls(report_md: str, advice: Optional[str]) -> None:
     """Download buttons + copy expander for the diagnosis."""
     ts_tag = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -233,12 +291,17 @@ def render_export_controls(report_md: str, advice: Optional[str]) -> None:
             help="同樣的內容但副檔名為 .txt，方便貼到 Slack / Notion / Word。",
         )
 
-    with st.expander("📋 複製到剪貼簿（點右上角圖示）", expanded=False):
-        st.caption("以下兩個區塊右上角都有複製按鈕，點一下就把內容複製到剪貼簿。")
+    with st.expander("📋 複製到剪貼簿", expanded=False):
+        st.caption(
+            "點下方按鈕即可複製到剪貼簿。如果你透過區網 IP（http://192.168...）"
+            "進來，瀏覽器會擋住 Secure Clipboard API，這裡用 fallback 方案讓 HTTP 也能複製。"
+        )
         st.markdown("**完整報告（Markdown）**")
+        copy_to_clipboard_button(report_md, "📋 複製完整報告")
         st.code(report_md, language="markdown")
         if advice:
             st.markdown("**只複製 Claude 建議**")
+            copy_to_clipboard_button(advice, "📋 複製 Claude 建議")
             st.code(advice, language="markdown")
 
 
