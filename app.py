@@ -389,6 +389,113 @@ def render_export_controls(report_md: str, advice: Optional[str]) -> None:
             st.code(advice, language="markdown")
 
 
+def render_custom_aoi_editor(image: Image.Image) -> List[tuple]:
+    """Drawable canvas for user-defined AOI rectangles.
+
+    Returns a list of ``(name, (x, y, w, h))`` tuples in *original* image
+    coordinates, ready to pass to ``aoi_mod.analyze``.
+    """
+    try:
+        from streamlit_drawable_canvas import st_canvas
+    except ImportError:
+        st.error(
+            "需要 `streamlit-drawable-canvas` 套件才能使用自訂 AOI 功能。\n"
+            "請先在終端機執行：`pip install streamlit-drawable-canvas`"
+        )
+        return []
+
+    orig_w, orig_h = image.size
+    display_w = min(900, orig_w)
+    scale = display_w / orig_w
+    display_h = int(orig_h * scale)
+
+    st.markdown("#### 🖍️ 自訂 AOI（在圖上拖曳畫框）")
+    st.caption(
+        f"原始尺寸 {orig_w}×{orig_h} px → 顯示縮放至 {display_w}×{display_h} px 方便操作。"
+        " 系統會自動換算回原始座標。"
+    )
+
+    col_ctrl1, col_ctrl2 = st.columns([3, 1])
+    with col_ctrl1:
+        st.markdown(
+            "**用法：** 滑鼠在下方圖片上拖曳即可畫出矩形 AOI。"
+            "畫完後在最下方為每個框命名（例如：CTA 按鈕、Logo、Hero、主視覺）。"
+        )
+    with col_ctrl2:
+        drawing_mode = st.selectbox(
+            "編輯模式",
+            ["rect", "transform"],
+            format_func=lambda x: {"rect": "✏️ 畫框", "transform": "🤚 移動 / 縮放"}[x],
+            key="canvas_mode",
+        )
+
+    canvas_result = st_canvas(
+        fill_color="rgba(255, 165, 0, 0.20)",
+        stroke_width=2,
+        stroke_color="#ff6b3d",
+        background_image=image,
+        drawing_mode=drawing_mode,
+        height=display_h,
+        width=display_w,
+        update_streamlit=True,
+        key="aoi_canvas",
+    )
+
+    objects = []
+    if canvas_result.json_data:
+        objects = [o for o in canvas_result.json_data.get("objects", []) if o.get("type") == "rect"]
+
+    if not objects:
+        st.info("📌 還沒畫任何 AOI。在上方圖片上按住滑鼠拖曳建立第一個框。")
+        return []
+
+    st.markdown(f"**📋 已建立 {len(objects)} 個 AOI（為每個框取名）：**")
+    regions: List[tuple] = []
+    preset_names = ["", "Logo", "Hero", "主 CTA", "次要 CTA", "Navigation", "Content", "Footer", "Form"]
+
+    for i, obj in enumerate(objects):
+        scale_x = obj.get("scaleX", 1) or 1
+        scale_y = obj.get("scaleY", 1) or 1
+        x_d = obj.get("left", 0)
+        y_d = obj.get("top", 0)
+        w_d = obj.get("width", 0) * scale_x
+        h_d = obj.get("height", 0) * scale_y
+
+        x = max(0, int(round(x_d / scale)))
+        y = max(0, int(round(y_d / scale)))
+        w = max(1, int(round(w_d / scale)))
+        h = max(1, int(round(h_d / scale)))
+        # clamp to image bounds
+        w = min(w, orig_w - x)
+        h = min(h, orig_h - y)
+
+        c1, c2, c3 = st.columns([3, 2, 4])
+        with c1:
+            name = st.text_input(
+                "名稱",
+                value=st.session_state.get(f"aoi_name_{i}", f"Region {i+1}"),
+                key=f"aoi_name_{i}",
+                label_visibility="collapsed",
+                placeholder=f"框 #{i+1} 名稱",
+            )
+        with c2:
+            preset = st.selectbox(
+                "預設",
+                preset_names,
+                key=f"aoi_preset_{i}",
+                label_visibility="collapsed",
+            )
+            if preset and preset != st.session_state.get(f"aoi_name_{i}", ""):
+                st.session_state[f"aoi_name_{i}"] = preset
+                name = preset
+        with c3:
+            st.caption(f"位置 ({x},{y})  尺寸 {w}×{h} px")
+
+        regions.append((name or f"Region {i+1}", (x, y, w, h)))
+
+    return regions
+
+
 def render_aoi_table(results) -> None:
     import pandas as pd
 
@@ -443,11 +550,16 @@ def main() -> None:
         st.header("Step 2 · ⚙️ 分析參數")
         layout_mode = st.radio(
             "AOI 分區方式",
-            ["垂直分區 (Header/Hero/Body/Footer)", "3×3 網格"],
+            [
+                "垂直分區 (Header/Hero/Body/Footer)",
+                "3×3 網格",
+                "🖍️ 自訂分區（手動畫框）",
+            ],
             help=(
                 "如何把畫面切成多個分析區域 (Area of Interest)。\n"
                 "垂直分區：依網頁結構切 Header / Hero / Body / Footer，適合典型 landing page。\n"
-                "3×3 網格：均分成九宮格，適合非標準版面或想看左右/上下分布。"
+                "3×3 網格：均分成九宮格，適合非標準版面或想看左右/上下分布。\n"
+                "自訂分區：在原圖上手動畫框，可精準對齊 CTA、Logo、表單等實際元件位置。"
             ),
         )
         user_goal = st.text_area(
@@ -502,6 +614,11 @@ def main() -> None:
     st.subheader("原始截圖")
     st.image(image, use_container_width=True)
 
+    custom_regions: List[tuple] = []
+    if layout_mode.startswith("🖍️"):
+        st.divider()
+        custom_regions = render_custom_aoi_editor(image)
+
     if st.button("Step 3 · 🚀 開始分析", type="primary", use_container_width=True):
         predictor = get_predictor()
         t0 = time.time()
@@ -516,8 +633,17 @@ def main() -> None:
         w, h = image.size
         if layout_mode.startswith("垂直"):
             regions = aoi_mod.vertical_band_layout(w, h)
-        else:
+        elif layout_mode.startswith("3×3"):
             regions = aoi_mod.grid_layout(w, h, rows=3, cols=3)
+        else:
+            if not custom_regions:
+                st.warning(
+                    "你選了『自訂分區』但沒畫任何框，這次先用垂直分區做為 fallback。"
+                    " 下次先在上方畫框再按開始分析。"
+                )
+                regions = aoi_mod.vertical_band_layout(w, h)
+            else:
+                regions = custom_regions
         aoi_results = aoi_mod.analyze(saliency, regions)
 
         st.session_state["analysis"] = {
