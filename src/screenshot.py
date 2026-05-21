@@ -31,7 +31,7 @@ def capture_url(
     url: str,
     viewport: Tuple[int, int] = (1440, 900),
     full_page: bool = True,
-    timeout_ms: int = 30000,
+    timeout_ms: int = 45000,
     auto_scroll: bool = True,
 ) -> Image.Image:
     """Render ``url`` headlessly and return a PIL image of the page.
@@ -42,8 +42,12 @@ def capture_url(
 
     The ``ngrok-skip-browser-warning`` header is always sent so screenshots
     of ngrok-tunneled apps land on the real page instead of ngrok's interstitial.
+
+    Loading strategy is two-stage: try ``networkidle`` (best for static sites)
+    with a tight budget, then fall back to ``load`` for sites that keep open
+    connections (Hotjar, Intercom, WebSocket chats, etc.).
     """
-    from playwright.sync_api import sync_playwright
+    from playwright.sync_api import sync_playwright, TimeoutError as PWTimeoutError
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -61,12 +65,25 @@ def capture_url(
                 },
             )
             page = context.new_page()
-            page.goto(url, wait_until="networkidle", timeout=timeout_ms)
+
+            networkidle_budget = min(15000, timeout_ms)
+            try:
+                page.goto(url, wait_until="networkidle", timeout=networkidle_budget)
+            except PWTimeoutError:
+                try:
+                    page.goto(url, wait_until="load", timeout=timeout_ms)
+                except PWTimeoutError:
+                    page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+                # Give scripts a moment to settle even though network never went idle.
+                page.wait_for_timeout(2000)
 
             if full_page and auto_scroll:
                 try:
                     page.evaluate(_AUTO_SCROLL_JS)
-                    page.wait_for_load_state("networkidle", timeout=timeout_ms)
+                    try:
+                        page.wait_for_load_state("networkidle", timeout=8000)
+                    except PWTimeoutError:
+                        page.wait_for_timeout(1500)
                 except Exception:
                     pass
 

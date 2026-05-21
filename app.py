@@ -245,6 +245,19 @@ def load_input_image() -> Optional[Image.Image]:
             disabled=not full_page,
         )
 
+        timeout_sec = st.slider(
+            "載入逾時 (秒)",
+            10,
+            120,
+            45,
+            step=5,
+            help=(
+                "Playwright 等待頁面載入的最長時間。"
+                "對網速慢或有大量 tracking 腳本的網站（會卡住 networkidle）拉高一點。"
+                "工具會先試 networkidle（短），失敗自動退到 load（長）。"
+            ),
+        )
+
         if url and st.button("擷取網頁截圖", use_container_width=True):
             spinner_msg = "整頁截圖中（捲動載入 + 拍照可能要 10–30 秒）…" if full_page else "Playwright 截圖中…"
             with st.spinner(spinner_msg):
@@ -254,6 +267,7 @@ def load_input_image() -> Optional[Image.Image]:
                         viewport=(int(vp_w), int(vp_h)),
                         full_page=full_page,
                         auto_scroll=auto_scroll,
+                        timeout_ms=int(timeout_sec) * 1000,
                     )
                     st.session_state["captured_image"] = captured
                     st.success(f"截圖完成：{captured.size[0]} × {captured.size[1]} px")
