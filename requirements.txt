@@ -7,6 +7,9 @@ scipy>=1.10.0
 Pillow>=10.0.0
 matplotlib>=3.7.0
 opencv-python-headless>=4.8.0
+einops>=0.7.0
+transformers>=4.40.0
+timm>=0.9.0
 git+https://github.com/openai/CLIP.git
 git+https://github.com/matthias-k/DeepGaze.git
 playwright>=1.40.0
