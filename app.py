@@ -24,6 +24,82 @@ from src.visualization import Hotspot, draw_hotspots, find_hotspots, overlay_hea
 st.set_page_config(page_title="DeepGaze IIE Website Analyzer", layout="wide")
 
 
+_CUSTOM_CSS = """
+<style>
+/* === Primary action button (Step 3 · 🚀 開始分析) === */
+div[data-testid="stButton"] > button[kind="primary"] {
+    font-size: 1.05rem !important;
+    font-weight: 700 !important;
+    padding: 0.75rem 1.25rem !important;
+    background: linear-gradient(135deg, #ff8a4d 0%, #ff5d3a 100%) !important;
+    color: #fff !important;
+    border: 0 !important;
+    box-shadow: 0 4px 14px rgba(255, 93, 58, 0.30) !important;
+    transition: transform 0.05s ease, box-shadow 0.2s ease, filter 0.15s ease;
+    letter-spacing: 0.02em;
+}
+div[data-testid="stButton"] > button[kind="primary"]:hover {
+    filter: brightness(1.06);
+    box-shadow: 0 6px 18px rgba(255, 93, 58, 0.40) !important;
+}
+div[data-testid="stButton"] > button[kind="primary"]:active {
+    transform: translateY(1px);
+}
+
+/* === File uploader drop zone === */
+section[data-testid="stFileUploaderDropzone"],
+[data-testid="stFileUploaderDropzone"] {
+    background: #eff6ff !important;
+    border: 2px dashed #4c9aff !important;
+    border-radius: 12px !important;
+    padding: 1.5rem 1.25rem !important;
+    min-height: 130px !important;
+    transition: background 0.2s ease, border-color 0.2s ease;
+}
+section[data-testid="stFileUploaderDropzone"]:hover,
+[data-testid="stFileUploaderDropzone"]:hover {
+    background: #e0edff !important;
+    border-color: #2680eb !important;
+}
+[data-testid="stFileUploaderDropzone"] button {
+    background: #2680eb !important;
+    color: #fff !important;
+    border: 0 !important;
+    font-weight: 600 !important;
+    padding: 0.5rem 1.1rem !important;
+    border-radius: 6px !important;
+}
+[data-testid="stFileUploaderDropzone"] button:hover {
+    background: #1c6ed0 !important;
+}
+
+/* === URL text input focus pop === */
+[data-testid="stTextInput"] input:focus {
+    border-color: #2680eb !important;
+    box-shadow: 0 0 0 3px rgba(38, 128, 235, 0.15) !important;
+}
+
+/* === Tabs: bigger Step 1 label, blue indicator when active === */
+div[data-testid="stTabs"] button[role="tab"] {
+    font-size: 0.98rem !important;
+    font-weight: 600 !important;
+}
+div[data-testid="stTabs"] button[role="tab"][aria-selected="true"] {
+    color: #2680eb !important;
+}
+
+/* === Step 1 info banner: tighter, accent bar === */
+div[data-testid="stAlert"] {
+    border-left: 4px solid #2680eb !important;
+}
+</style>
+"""
+
+
+def _inject_custom_css() -> None:
+    st.markdown(_CUSTOM_CSS, unsafe_allow_html=True)
+
+
 @st.cache_resource(show_spinner="載入 DeepGaze IIE 模型中…")
 def get_predictor() -> DeepGazePredictor:
     return DeepGazePredictor()
@@ -323,6 +399,7 @@ def render_aoi_table(results) -> None:
 
 
 def main() -> None:
+    _inject_custom_css()
     st.markdown(
         """
         <div style="margin-bottom:0.6rem;">
