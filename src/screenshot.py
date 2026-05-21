@@ -39,6 +39,9 @@ def capture_url(
     When ``full_page`` is True, the entire scrollable document is captured
     (including content below the viewport). ``auto_scroll`` triggers a slow
     scroll-to-bottom first so lazy-loaded images/sections appear in the shot.
+
+    The ``ngrok-skip-browser-warning`` header is always sent so screenshots
+    of ngrok-tunneled apps land on the real page instead of ngrok's interstitial.
     """
     from playwright.sync_api import sync_playwright
 
@@ -48,6 +51,14 @@ def capture_url(
             context = browser.new_context(
                 viewport={"width": viewport[0], "height": viewport[1]},
                 device_scale_factor=1,
+                extra_http_headers={
+                    "ngrok-skip-browser-warning": "true",
+                    "User-Agent": (
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/124.0.0.0 Safari/537.36 DeepGazeAnalyzer/1.0"
+                    ),
+                },
             )
             page = context.new_page()
             page.goto(url, wait_until="networkidle", timeout=timeout_ms)
