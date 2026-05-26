@@ -593,6 +593,7 @@ def render_custom_aoi_editor(image: Image.Image) -> List[tuple]:
         st.session_state["aoi_drawing"] = _canvas_background_as_initial_drawing(
             canvas_bg, display_w, display_h
         )
+        st.session_state["aoi_names"] = []
         st.session_state["aoi_canvas_v"] = version + 1
         st.rerun()
 
@@ -600,21 +601,32 @@ def render_custom_aoi_editor(image: Image.Image) -> List[tuple]:
         st.info("📌 還沒畫任何 AOI。在上方圖片上按住滑鼠拖曳建立第一個框。")
         return []
 
-    def _rebuild_without(index_to_drop: int) -> None:
+    # Names are the source of truth, stored as an ordered list parallel to the
+    # rectangles. Deleting box i pops names[i] too, so names follow positions
+    # across the canvas remount (coordinate hashes proved unstable on reload).
+    names: list = st.session_state.setdefault("aoi_names", [])
+    while len(names) < len(rects):
+        names.append(f"Region {len(names) + 1}")
+
+    def _delete_aoi(index_to_drop: int) -> None:
         survivors = [r for j, r in enumerate(rects) if j != index_to_drop]
+        cur_names = st.session_state.get("aoi_names", [])
+        if index_to_drop < len(cur_names):
+            cur_names.pop(index_to_drop)
+        st.session_state["aoi_names"] = cur_names
         new_drawing = _canvas_background_as_initial_drawing(canvas_bg, display_w, display_h)
         new_drawing["objects"].extend(survivors)
         st.session_state["aoi_drawing"] = new_drawing
         st.session_state["aoi_canvas_v"] = version + 1
 
+    def _apply_aoi_preset(text_key: str, preset_key: str) -> None:
+        preset_val = st.session_state.get(preset_key, "")
+        if preset_val:
+            st.session_state[text_key] = preset_val
+
     st.markdown(f"**📋 已建立 {len(rects)} 個 AOI（為每個框取名）：**")
     regions: List[tuple] = []
     preset_names = ["", "Logo", "Hero", "主 CTA", "次要 CTA", "Navigation", "Content", "Footer", "Form"]
-
-    def _apply_aoi_preset(name_key: str, preset_key: str) -> None:
-        preset_val = st.session_state.get(preset_key, "")
-        if preset_val:
-            st.session_state[name_key] = preset_val
 
     for i, obj in enumerate(rects):
         scale_x = obj.get("scaleX", 1) or 1
@@ -631,18 +643,18 @@ def render_custom_aoi_editor(image: Image.Image) -> List[tuple]:
         w = min(w, orig_w - x)
         h = min(h, orig_h - y)
 
-        # bbox-based key so a name follows its box even after other boxes are deleted
-        bbox_id = hashlib.md5(f"{x}_{y}_{w}_{h}".encode()).hexdigest()[:8]
-        name_key = f"aoi_name_{bbox_id}"
-        preset_key = f"aoi_preset_{bbox_id}"
-        if name_key not in st.session_state:
-            st.session_state[name_key] = f"Region {i+1}"
+        # Keys carry the canvas version so a delete (which bumps the version)
+        # produces fresh widgets re-seeded from the trimmed `names` list.
+        text_key = f"aoi_name_{version}_{i}"
+        preset_key = f"aoi_preset_{version}_{i}"
+        default_name = names[i] if i < len(names) else f"Region {i+1}"
 
         c1, c2, c3, c4 = st.columns([3, 2, 3, 1])
         with c1:
             name = st.text_input(
                 "名稱",
-                key=name_key,
+                value=default_name,
+                key=text_key,
                 label_visibility="collapsed",
                 placeholder=f"框 #{i+1} 名稱",
             )
@@ -653,15 +665,17 @@ def render_custom_aoi_editor(image: Image.Image) -> List[tuple]:
                 key=preset_key,
                 label_visibility="collapsed",
                 on_change=_apply_aoi_preset,
-                args=(name_key, preset_key),
+                args=(text_key, preset_key),
             )
         with c3:
             st.caption(f"位置 ({x},{y})  尺寸 {w}×{h} px")
         with c4:
-            if st.button("🗑️", key=f"del_{bbox_id}", help="刪除這個 AOI"):
-                _rebuild_without(i)
+            if st.button("🗑️", key=f"del_{version}_{i}", help="刪除這個 AOI"):
+                _delete_aoi(i)
                 st.rerun()
 
+        if i < len(names):
+            names[i] = name
         regions.append((name or f"Region {i+1}", (x, y, w, h)))
 
     return regions
