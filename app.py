@@ -539,19 +539,25 @@ def render_custom_aoi_editor(image: Image.Image) -> List[tuple]:
         )
         st.image(canvas_bg, caption="這張就是即將餵給畫布的背景圖")
 
-    col_ctrl1, col_ctrl2 = st.columns([3, 1])
-    with col_ctrl1:
-        st.markdown(
-            "**用法：** 滑鼠在下方圖片上拖曳即可畫出矩形 AOI。"
-            "畫完後在最下方為每個框命名（例如：CTA 按鈕、Logo、Hero、主視覺）。"
-        )
-    with col_ctrl2:
-        drawing_mode = st.selectbox(
-            "編輯模式",
-            ["rect", "transform"],
-            format_func=lambda x: {"rect": "✏️ 畫框", "transform": "🤚 移動 / 縮放"}[x],
-            key="canvas_mode",
-        )
+    st.markdown(
+        "**用法：** 滑鼠在下方圖片上拖曳即可畫出矩形 AOI。"
+        "切到「🤚 移動 / 縮放」可調整已畫的框；畫錯的框可在下方列表用 🗑️ 單獨刪除。"
+    )
+
+    # Mode selector is rendered BELOW the canvas, but the canvas needs its value
+    # to render — so read it from session_state (seeded by the widget last run).
+    drawing_mode = st.session_state.get("canvas_mode", "rect")
+
+    # A version counter lets us force-remount the canvas (the only way to drop
+    # an individual rectangle) by re-seeding initial_drawing without that box.
+    if "aoi_canvas_v" not in st.session_state:
+        st.session_state["aoi_canvas_v"] = 0
+    version = st.session_state["aoi_canvas_v"]
+    canvas_key = f"aoi_canvas_{version}"
+
+    initial_drawing = st.session_state.get("aoi_drawing")
+    if initial_drawing is None:
+        initial_drawing = _canvas_background_as_initial_drawing(canvas_bg, display_w, display_h)
 
     canvas_result = st_canvas(
         fill_color="rgba(255, 165, 0, 0.20)",
@@ -562,31 +568,55 @@ def render_custom_aoi_editor(image: Image.Image) -> List[tuple]:
         height=display_h,
         width=display_w,
         update_streamlit=True,
-        initial_drawing=_canvas_background_as_initial_drawing(canvas_bg, display_w, display_h),
-        key="aoi_canvas",
+        initial_drawing=initial_drawing,
+        key=canvas_key,
     )
 
-    objects = []
-    if canvas_result.json_data:
-        objects = [
-            o for o in canvas_result.json_data.get("objects", [])
-            if o.get("type") == "rect" and not o.get("_aoi_bg")
-        ]
+    mode_col, clear_col = st.columns([3, 1])
+    with mode_col:
+        st.selectbox(
+            "編輯模式",
+            ["rect", "transform"],
+            format_func=lambda x: {"rect": "✏️ 畫框", "transform": "🤚 移動 / 縮放"}[x],
+            key="canvas_mode",
+        )
+    with clear_col:
+        st.markdown("<div style='height:1.75rem;'></div>", unsafe_allow_html=True)
+        clear_all = st.button("🗑️ 清除全部", use_container_width=True)
 
-    if not objects:
+    all_objects = []
+    if canvas_result.json_data:
+        all_objects = list(canvas_result.json_data.get("objects", []))
+    rects = [o for o in all_objects if o.get("type") == "rect" and not o.get("_aoi_bg")]
+
+    if clear_all:
+        st.session_state["aoi_drawing"] = _canvas_background_as_initial_drawing(
+            canvas_bg, display_w, display_h
+        )
+        st.session_state["aoi_canvas_v"] = version + 1
+        st.rerun()
+
+    if not rects:
         st.info("📌 還沒畫任何 AOI。在上方圖片上按住滑鼠拖曳建立第一個框。")
         return []
 
-    st.markdown(f"**📋 已建立 {len(objects)} 個 AOI（為每個框取名）：**")
+    def _rebuild_without(index_to_drop: int) -> None:
+        survivors = [r for j, r in enumerate(rects) if j != index_to_drop]
+        new_drawing = _canvas_background_as_initial_drawing(canvas_bg, display_w, display_h)
+        new_drawing["objects"].extend(survivors)
+        st.session_state["aoi_drawing"] = new_drawing
+        st.session_state["aoi_canvas_v"] = version + 1
+
+    st.markdown(f"**📋 已建立 {len(rects)} 個 AOI（為每個框取名）：**")
     regions: List[tuple] = []
     preset_names = ["", "Logo", "Hero", "主 CTA", "次要 CTA", "Navigation", "Content", "Footer", "Form"]
 
-    def _apply_aoi_preset(idx: int) -> None:
-        preset_val = st.session_state.get(f"aoi_preset_{idx}", "")
+    def _apply_aoi_preset(name_key: str, preset_key: str) -> None:
+        preset_val = st.session_state.get(preset_key, "")
         if preset_val:
-            st.session_state[f"aoi_name_{idx}"] = preset_val
+            st.session_state[name_key] = preset_val
 
-    for i, obj in enumerate(objects):
+    for i, obj in enumerate(rects):
         scale_x = obj.get("scaleX", 1) or 1
         scale_y = obj.get("scaleY", 1) or 1
         x_d = obj.get("left", 0)
@@ -598,15 +628,17 @@ def render_custom_aoi_editor(image: Image.Image) -> List[tuple]:
         y = max(0, int(round(y_d / scale)))
         w = max(1, int(round(w_d / scale)))
         h = max(1, int(round(h_d / scale)))
-        # clamp to image bounds
         w = min(w, orig_w - x)
         h = min(h, orig_h - y)
 
-        name_key = f"aoi_name_{i}"
+        # bbox-based key so a name follows its box even after other boxes are deleted
+        bbox_id = hashlib.md5(f"{x}_{y}_{w}_{h}".encode()).hexdigest()[:8]
+        name_key = f"aoi_name_{bbox_id}"
+        preset_key = f"aoi_preset_{bbox_id}"
         if name_key not in st.session_state:
             st.session_state[name_key] = f"Region {i+1}"
 
-        c1, c2, c3 = st.columns([3, 2, 4])
+        c1, c2, c3, c4 = st.columns([3, 2, 3, 1])
         with c1:
             name = st.text_input(
                 "名稱",
@@ -618,13 +650,17 @@ def render_custom_aoi_editor(image: Image.Image) -> List[tuple]:
             st.selectbox(
                 "預設",
                 preset_names,
-                key=f"aoi_preset_{i}",
+                key=preset_key,
                 label_visibility="collapsed",
                 on_change=_apply_aoi_preset,
-                args=(i,),
+                args=(name_key, preset_key),
             )
         with c3:
             st.caption(f"位置 ({x},{y})  尺寸 {w}×{h} px")
+        with c4:
+            if st.button("🗑️", key=f"del_{bbox_id}", help="刪除這個 AOI"):
+                _rebuild_without(i)
+                st.rerun()
 
         regions.append((name or f"Region {i+1}", (x, y, w, h)))
 
