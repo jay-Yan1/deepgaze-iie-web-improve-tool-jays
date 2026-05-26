@@ -458,6 +458,29 @@ def render_export_controls(report_md: str, advice: Optional[str]) -> None:
             st.code(advice, language="markdown")
 
 
+DEFAULT_AOI_COLOR = "#ff6b3d"
+
+
+def _hex_to_rgba(hex_color: str, alpha: float) -> str:
+    h = (hex_color or DEFAULT_AOI_COLOR).lstrip("#")
+    if len(h) != 6:
+        h = DEFAULT_AOI_COLOR.lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return f"rgba({r}, {g}, {b}, {alpha})"
+
+
+def _apply_colors_to_rects(rects: list, colors: list) -> list:
+    """Return copies of ``rects`` with per-box stroke/fill colour baked in."""
+    out = []
+    for j, r in enumerate(rects):
+        rc = dict(r)
+        color = colors[j] if j < len(colors) else DEFAULT_AOI_COLOR
+        rc["stroke"] = color
+        rc["fill"] = _hex_to_rgba(color, 0.20)
+        out.append(rc)
+    return out
+
+
 def _canvas_background_as_initial_drawing(image: Image.Image, width: int, height: int) -> dict:
     """Embed ``image`` as a non-selectable fabric.js object so it acts as a
     background, bypassing st_canvas's broken ``background_image`` path."""
@@ -560,9 +583,9 @@ def render_custom_aoi_editor(image: Image.Image) -> List[tuple]:
         initial_drawing = _canvas_background_as_initial_drawing(canvas_bg, display_w, display_h)
 
     canvas_result = st_canvas(
-        fill_color="rgba(255, 165, 0, 0.20)",
+        fill_color=_hex_to_rgba(DEFAULT_AOI_COLOR, 0.20),
         stroke_width=2,
-        stroke_color="#ff6b3d",
+        stroke_color=DEFAULT_AOI_COLOR,
         background_color="rgba(0, 0, 0, 0)",
         drawing_mode=drawing_mode,
         height=display_h,
@@ -594,6 +617,7 @@ def render_custom_aoi_editor(image: Image.Image) -> List[tuple]:
             canvas_bg, display_w, display_h
         )
         st.session_state["aoi_names"] = []
+        st.session_state["aoi_colors"] = []
         st.session_state["aoi_canvas_v"] = version + 1
         st.rerun()
 
@@ -601,30 +625,40 @@ def render_custom_aoi_editor(image: Image.Image) -> List[tuple]:
         st.info("📌 還沒畫任何 AOI。在上方圖片上按住滑鼠拖曳建立第一個框。")
         return []
 
-    # Names are the source of truth, stored as an ordered list parallel to the
-    # rectangles. Deleting box i pops names[i] too, so names follow positions
-    # across the canvas remount (coordinate hashes proved unstable on reload).
+    # Names/colors are the source of truth, stored as ordered lists parallel to
+    # the rectangles. Deleting box i pops names[i]/colors[i] too, so they follow
+    # positions across the canvas remount (coordinate hashes proved unstable).
     names: list = st.session_state.setdefault("aoi_names", [])
+    colors: list = st.session_state.setdefault("aoi_colors", [])
     while len(names) < len(rects):
         names.append(f"Region {len(names) + 1}")
+    while len(colors) < len(rects):
+        colors.append(DEFAULT_AOI_COLOR)
+
+    def _remount_with(survivor_rects: list, survivor_colors: list) -> None:
+        new_drawing = _canvas_background_as_initial_drawing(canvas_bg, display_w, display_h)
+        new_drawing["objects"].extend(_apply_colors_to_rects(survivor_rects, survivor_colors))
+        st.session_state["aoi_drawing"] = new_drawing
+        st.session_state["aoi_canvas_v"] = version + 1
 
     def _delete_aoi(index_to_drop: int) -> None:
         survivors = [r for j, r in enumerate(rects) if j != index_to_drop]
         cur_names = st.session_state.get("aoi_names", [])
+        cur_colors = st.session_state.get("aoi_colors", [])
         if index_to_drop < len(cur_names):
             cur_names.pop(index_to_drop)
+        if index_to_drop < len(cur_colors):
+            cur_colors.pop(index_to_drop)
         st.session_state["aoi_names"] = cur_names
-        new_drawing = _canvas_background_as_initial_drawing(canvas_bg, display_w, display_h)
-        new_drawing["objects"].extend(survivors)
-        st.session_state["aoi_drawing"] = new_drawing
-        st.session_state["aoi_canvas_v"] = version + 1
+        st.session_state["aoi_colors"] = cur_colors
+        _remount_with(survivors, cur_colors)
 
     def _apply_aoi_preset(text_key: str, preset_key: str) -> None:
         preset_val = st.session_state.get(preset_key, "")
         if preset_val:
             st.session_state[text_key] = preset_val
 
-    st.markdown(f"**📋 已建立 {len(rects)} 個 AOI（為每個框取名）：**")
+    st.markdown(f"**📋 已建立 {len(rects)} 個 AOI（命名 / 改色 / 刪除）：**")
     regions: List[tuple] = []
     preset_names = ["", "Logo", "Hero", "主 CTA", "次要 CTA", "Navigation", "Content", "Footer", "Form"]
 
@@ -643,13 +677,15 @@ def render_custom_aoi_editor(image: Image.Image) -> List[tuple]:
         w = min(w, orig_w - x)
         h = min(h, orig_h - y)
 
-        # Keys carry the canvas version so a delete (which bumps the version)
-        # produces fresh widgets re-seeded from the trimmed `names` list.
+        # Keys carry the canvas version so a delete/recolor (which bumps the
+        # version) produces fresh widgets re-seeded from the trimmed lists.
         text_key = f"aoi_name_{version}_{i}"
         preset_key = f"aoi_preset_{version}_{i}"
+        color_key = f"aoi_color_{version}_{i}"
         default_name = names[i] if i < len(names) else f"Region {i+1}"
+        default_color = colors[i] if i < len(colors) else DEFAULT_AOI_COLOR
 
-        c1, c2, c3, c4 = st.columns([3, 2, 3, 1])
+        c1, c2, c3, c4, c5 = st.columns([3, 2, 1, 2, 1])
         with c1:
             name = st.text_input(
                 "名稱",
@@ -668,14 +704,27 @@ def render_custom_aoi_editor(image: Image.Image) -> List[tuple]:
                 args=(text_key, preset_key),
             )
         with c3:
-            st.caption(f"位置 ({x},{y})  尺寸 {w}×{h} px")
+            picked = st.color_picker(
+                "顏色",
+                value=default_color,
+                key=color_key,
+                label_visibility="collapsed",
+            )
         with c4:
-            if st.button("🗑️", key=f"del_{version}_{i}", help="刪除這個 AOI"):
-                _delete_aoi(i)
-                st.rerun()
+            st.caption(f"({x},{y}) {w}×{h}px")
+        with c5:
+            delete_clicked = st.button("🗑️", key=f"del_{version}_{i}", help="刪除這個 AOI")
 
         if i < len(names):
             names[i] = name
+        if i < len(colors) and picked != colors[i]:
+            colors[i] = picked
+            _remount_with(rects, colors)
+            st.rerun()
+        if delete_clicked:
+            _delete_aoi(i)
+            st.rerun()
+
         regions.append((name or f"Region {i+1}", (x, y, w, h)))
 
     return regions
