@@ -17,7 +17,11 @@ from PIL import Image
 
 from src import aoi as aoi_mod
 from src.aoi import AOIResult
-from src.llm_advisor import suggest_improvements
+from src.llm_advisor import (
+    CLAUDE_MODELS,
+    GEMINI_MODELS,
+    suggest_improvements,
+)
 from src.saliency import DeepGazePredictor
 from src.screenshot import capture_url
 from src.visualization import Hotspot, draw_hotspots, find_hotspots, overlay_heatmap
@@ -769,17 +773,47 @@ def main() -> None:
 
     with st.sidebar:
         st.markdown(
-            "<p style='font-size:0.78rem;color:#888;margin:0;'>🔑 API 設定</p>",
+            "<p style='font-size:0.78rem;color:#888;margin:0;'>🔑 LLM 設定</p>",
             unsafe_allow_html=True,
         )
-        api_key = st.text_input(
-            "Anthropic API Key",
-            value=os.environ.get("ANTHROPIC_API_KEY", ""),
-            type="password",
-            help="僅在本機 session 使用，不會被儲存。",
-            label_visibility="collapsed",
-            placeholder="sk-ant-... (沒有 key 就跳過，只看熱力圖)",
+        llm_provider = st.radio(
+            "分析引擎",
+            ["Claude (Anthropic)", "Gemini (Google)"],
+            horizontal=True,
+            help="選擇要用哪家的模型產生改版建議。各自填各自的 API Key。",
         )
+        if llm_provider.startswith("Gemini"):
+            provider = "gemini"
+            api_key = st.text_input(
+                "Gemini API Key",
+                value=os.environ.get("GEMINI_API_KEY", "") or os.environ.get("GOOGLE_API_KEY", ""),
+                type="password",
+                help="僅在本機 session 使用，不會被儲存。可從 Google AI Studio 取得。",
+                label_visibility="collapsed",
+                placeholder="AIza... (沒有 key 就跳過，只看熱力圖)",
+            )
+            llm_model = st.selectbox(
+                "Gemini 模型",
+                GEMINI_MODELS,
+                index=0,
+                help="flash 較快較便宜，pro 分析較深入。",
+            )
+        else:
+            provider = "claude"
+            api_key = st.text_input(
+                "Anthropic API Key",
+                value=os.environ.get("ANTHROPIC_API_KEY", ""),
+                type="password",
+                help="僅在本機 session 使用，不會被儲存。",
+                label_visibility="collapsed",
+                placeholder="sk-ant-... (沒有 key 就跳過，只看熱力圖)",
+            )
+            llm_model = st.selectbox(
+                "Claude 模型",
+                CLAUDE_MODELS,
+                index=0,
+                help="sonnet 平衡，opus 最強，haiku 最快最省。",
+            )
         st.divider()
         st.header("Step 2 · ⚙️ 分析參數")
         layout_mode = st.radio(
@@ -929,32 +963,43 @@ def main() -> None:
         "<1 代表該區域相對被忽略。"
     )
 
-    st.markdown("#### 🧠 Claude 改版建議")
+    engine_label = "Gemini" if provider == "gemini" else "Claude"
+    st.markdown(f"#### 🧠 {engine_label} 改版建議（模型：{llm_model}）")
     if not api_key:
-        st.warning("請在左側填入 Anthropic API Key 以啟用 LLM 建議。")
+        st.warning(f"請在左側填入 {engine_label} API Key 以啟用 LLM 建議。")
     else:
+        # Re-run the LLM if the engine/model changed since the cached advice.
+        cache_sig = f"{provider}|{llm_model}"
+        if st.session_state.get("advice_sig") != cache_sig:
+            st.session_state.pop("advice", None)
+            st.session_state.pop("advice_error", None)
+
         if "advice" not in st.session_state and "advice_error" not in st.session_state:
             try:
-                with st.spinner("Claude 分析中…"):
+                with st.spinner(f"{engine_label} 分析中…"):
                     st.session_state["advice"] = suggest_improvements(
                         original=a["image"],
                         overlay=a["overlay"],
                         hotspots=a["hotspots"],
                         aoi=a["aoi_results"],
                         user_goal=a["user_goal"],
+                        provider=provider,
+                        model=llm_model,
                         api_key=api_key,
                     )
+                    st.session_state["advice_sig"] = cache_sig
             except Exception as exc:
                 st.session_state["advice_error"] = str(exc)
+                st.session_state["advice_sig"] = cache_sig
 
         if "advice_error" in st.session_state:
             st.error(f"LLM 呼叫失敗：{st.session_state['advice_error']}")
-            if st.button("🔁 重試 Claude 建議"):
+            if st.button(f"🔁 重試 {engine_label} 建議"):
                 st.session_state.pop("advice_error", None)
                 st.rerun()
         elif "advice" in st.session_state:
             st.markdown(st.session_state["advice"])
-            if st.button("🔁 重新產生 Claude 建議"):
+            if st.button(f"🔁 重新產生 {engine_label} 建議"):
                 st.session_state.pop("advice", None)
                 st.rerun()
 

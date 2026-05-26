@@ -1,4 +1,4 @@
-"""Use Claude to translate saliency stats into concrete UX improvement suggestions."""
+"""Translate saliency stats into concrete UX suggestions via Claude or Gemini."""
 from __future__ import annotations
 
 import base64
@@ -11,7 +11,22 @@ from PIL import Image
 from .aoi import AOIResult
 from .visualization import Hotspot
 
-DEFAULT_MODEL = "claude-sonnet-4-6"
+DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-6"
+DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
+
+# Backwards-compatible alias
+DEFAULT_MODEL = DEFAULT_CLAUDE_MODEL
+
+CLAUDE_MODELS = [
+    "claude-sonnet-4-6",
+    "claude-opus-4-7",
+    "claude-haiku-4-5-20251001",
+]
+GEMINI_MODELS = [
+    "gemini-2.5-flash",
+    "gemini-2.5-pro",
+    "gemini-2.0-flash",
+]
 
 SYSTEM_PROMPT = """You are a senior UX/conversion analyst.
 
@@ -34,12 +49,17 @@ Style:
 - Keep it under 400 words, use short bullet points grouped by theme."""
 
 
-def _image_to_b64(image: Image.Image, max_side: int = 1280) -> str:
+def _resize_for_llm(image: Image.Image, max_side: int = 1280) -> Image.Image:
     img = image.convert("RGB")
     w, h = img.size
     scale = min(1.0, max_side / max(w, h))
     if scale < 1.0:
         img = img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+    return img
+
+
+def _image_to_b64(image: Image.Image, max_side: int = 1280) -> str:
+    img = _resize_for_llm(image, max_side)
     buf = io.BytesIO()
     img.save(buf, format="JPEG", quality=85)
     return base64.standard_b64encode(buf.getvalue()).decode("ascii")
@@ -72,34 +92,31 @@ def _format_aoi(aoi: List[AOIResult]) -> str:
     return "\n".join(lines)
 
 
-def suggest_improvements(
+def _build_data_block(
     original: Image.Image,
-    overlay: Image.Image,
     hotspots: List[Hotspot],
     aoi: List[AOIResult],
-    user_goal: str = "",
-    model: str = DEFAULT_MODEL,
-    api_key: Optional[str] = None,
+    user_goal: str,
 ) -> str:
-    """Call Claude to produce written UX suggestions. Returns the assistant text."""
-    from anthropic import Anthropic
-
-    api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        raise RuntimeError(
-            "ANTHROPIC_API_KEY is not set. Provide it in the sidebar or as an env var."
-        )
-
-    client = Anthropic(api_key=api_key)
     w, h = original.size
-
-    data_block = (
+    return (
         f"Image size: {w} x {h} pixels\n"
         f"User goal / context: {user_goal or '(not specified)'}\n\n"
         f"Top hotspots (ranked by total saliency mass):\n{_format_hotspots(hotspots, w, h)}\n\n"
         f"Per-AOI attention breakdown:\n{_format_aoi(aoi)}"
     )
 
+
+def _suggest_claude(
+    original: Image.Image,
+    overlay: Image.Image,
+    data_block: str,
+    model: str,
+    api_key: str,
+) -> str:
+    from anthropic import Anthropic
+
+    client = Anthropic(api_key=api_key)
     response = client.messages.create(
         model=model,
         max_tokens=1200,
@@ -135,6 +152,66 @@ def suggest_improvements(
             }
         ],
     )
-
     parts = [block.text for block in response.content if getattr(block, "type", None) == "text"]
     return "\n".join(parts).strip()
+
+
+def _suggest_gemini(
+    original: Image.Image,
+    overlay: Image.Image,
+    data_block: str,
+    model: str,
+    api_key: str,
+) -> str:
+    from google import genai
+    from google.genai import types
+
+    client = genai.Client(api_key=api_key)
+    response = client.models.generate_content(
+        model=model,
+        contents=[
+            _resize_for_llm(original),
+            _resize_for_llm(overlay),
+            data_block,
+        ],
+        config=types.GenerateContentConfig(
+            system_instruction=SYSTEM_PROMPT,
+            max_output_tokens=1500,
+        ),
+    )
+    return (response.text or "").strip()
+
+
+def suggest_improvements(
+    original: Image.Image,
+    overlay: Image.Image,
+    hotspots: List[Hotspot],
+    aoi: List[AOIResult],
+    user_goal: str = "",
+    provider: str = "claude",
+    model: Optional[str] = None,
+    api_key: Optional[str] = None,
+) -> str:
+    """Produce written UX suggestions using the chosen provider.
+
+    ``provider`` is "claude" or "gemini". ``model`` defaults to that provider's
+    recommended model. ``api_key`` falls back to the provider's env var.
+    """
+    provider = (provider or "claude").lower()
+    data_block = _build_data_block(original, hotspots, aoi, user_goal)
+
+    if provider == "gemini":
+        key = api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+        if not key:
+            raise RuntimeError(
+                "Gemini API key is not set. Provide it in the sidebar or set "
+                "GEMINI_API_KEY / GOOGLE_API_KEY."
+            )
+        return _suggest_gemini(original, overlay, data_block, model or DEFAULT_GEMINI_MODEL, key)
+
+    key = api_key or os.environ.get("ANTHROPIC_API_KEY")
+    if not key:
+        raise RuntimeError(
+            "ANTHROPIC_API_KEY is not set. Provide it in the sidebar or as an env var."
+        )
+    return _suggest_claude(original, overlay, data_block, model or DEFAULT_CLAUDE_MODEL, key)
