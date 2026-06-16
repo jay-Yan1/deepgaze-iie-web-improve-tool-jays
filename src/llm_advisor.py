@@ -12,7 +12,7 @@ from .aoi import AOIResult
 from .visualization import Hotspot
 
 DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-6"
-DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
+DEFAULT_GEMINI_MODEL = "gemini-3.5-flash"
 
 # Backwards-compatible alias
 DEFAULT_MODEL = DEFAULT_CLAUDE_MODEL
@@ -23,6 +23,8 @@ CLAUDE_MODELS = [
     "claude-haiku-4-5-20251001",
 ]
 GEMINI_MODELS = [
+    "gemini-3.5-flash",
+    "gemini-3.5-pro",
     "gemini-2.5-flash",
     "gemini-2.5-pro",
     "gemini-2.0-flash",
