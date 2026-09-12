@@ -5,9 +5,22 @@ description: 用 DeepGaze IIE 預測使用者第一眼會看向網頁的哪裡�
 
 # 網頁視覺動線檢查
 
-跑 `analyze_cli.py`，它會輸出 JSON（stdout）加三張 PNG。**一定要用 Read 工具打開 `heatmap` 和 `hotspots` 兩張圖親眼看**，數字只說明「多少」，圖才說明「在哪裡、是哪個元件」。
+不論用哪種呼叫方式，結果都是 JSON 數據 + 三張 PNG。**一定要用 Read 工具打開 `heatmap` 和 `hotspots` 兩張圖親眼看**，數字只說明「多少」，圖才說明「在哪裡、是哪個元件」。
 
-## 執行
+## 先看有沒有 MCP 工具
+
+如果工具列表裡有 `deepgaze_analyze_page` / `deepgaze_compare_pages`，**優先用它們**，不要跑 CLI：MCP server 常駐把模型留在記憶體，第二次之後的分析省掉 10–30 秒的載入。判讀準則（下面「判讀」一節）兩邊通用。
+
+- 一次分析：`deepgaze_analyze_page`，參數同下方 CLI 選項（`aoi` 傳字串陣列如 `["CTA:820,340,300,90"]`）。
+- 改版前後對照：`deepgaze_compare_pages`，兩邊用同一組 `aoi`，會直接給你 intensity 的變化量。
+- 預期等一下才會用到：先呼叫 `deepgaze_warm_up` 把權重載起來，趁你還在寫 markup 的時候。
+- `out_dir` 是相對 server 的工作目錄，要確定圖存在哪就傳絕對路徑。
+
+沒有這些工具就用下面的 CLI。
+
+## CLI
+
+`analyze_cli.py` 把 JSON 印到 stdout、進度印到 stderr。
 
 ```bash
 python analyze_cli.py <target> --out <輸出資料夾>
