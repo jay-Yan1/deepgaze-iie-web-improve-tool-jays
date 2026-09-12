@@ -11,3 +11,4 @@ venv/
 *.egg-info/
 .streamlit/secrets.toml
 assets/centerbias_mit1003.npy
+saliency_out/

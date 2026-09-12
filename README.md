@@ -9,6 +9,7 @@
 - 📍 **Top-K 熱點偵測**：以連通元件抓出最吸睛的 N 個區域，含座標、面積、注意力佔比。
 - 🗺️ **AOI 區域分析**：垂直分區 (Header/Hero/Body/Footer) 或 3×3 網格，計算每區的「注意力 / 面積」效率。
 - 🧠 **Claude 改版建議**：傳送原圖 + 熱力圖 + AOI 數據給 Claude，產出可行動的設計建議。
+- 🤖 **CLI / Agent 模式**：`analyze_cli.py` 用命令列跑同一套流程並輸出 JSON，讓 Claude Code 等 agent 在設計網頁時直接呼叫。
 
 ## 安裝
 
@@ -39,12 +40,31 @@ streamlit run app.py
    - AOI 表格
    - Claude 文字建議
 
+## 給 Claude Code 用（CLI 模式）
+
+Streamlit 是給人操作的，agent 沒辦法呼叫。`analyze_cli.py` 提供同一套流程的無介面版本：JSON 走 stdout、進度走 stderr、圖片存到 `--out` 資料夾，且不呼叫 LLM（agent 自己就是那個 LLM，直接讀圖判讀即可）。
+
+```bash
+python analyze_cli.py https://example.com --out ./saliency_out
+python analyze_cli.py ./index.html --first-screen          # 本機 HTML，只看首屏
+python analyze_cli.py http://localhost:3000 --aoi "CTA:820,340,300,90"
+python analyze_cli.py shot.png --layout grid --top-k 3
+python analyze_cli.py --help                               # 完整選項
+```
+
+輸出的 JSON 包含 `hotspots`（排名、bbox、注意力佔比）與 `aoi`（每區的 `attention_share` / `area_share` / `intensity_ratio`），並附上 `original.png`、`heatmap.png`、`hotspots.png` 的路徑。
+
+`.claude/skills/saliency-check/` 是搭配的 Claude Code Skill：載入這個 repo 後，Claude Code 在改網頁版面時會自動想到用它來驗證視覺動線，也可以打 `/saliency-check` 手動觸發。Skill 內含執行方式、`intensity_ratio` 判讀準則與模型限制說明。
+
 ## 專案結構
 
 ```
 .
 ├── app.py                 # Streamlit 介面
+├── analyze_cli.py         # 無介面 CLI，輸出 JSON 給 agent 用
 ├── requirements.txt
+├── .claude/skills/
+│   └── saliency-check/    # Claude Code Skill：設計網頁時自動驗證視覺動線
 ├── src/
 │   ├── saliency.py        # DeepGaze IIE 推論包裝
 │   ├── screenshot.py      # Playwright 整頁截圖
